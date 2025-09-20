@@ -17,12 +17,15 @@ jobs:
       - run: npx wait-on http://localhost:3000
       - uses: zaproxy/action-baseline@v0.11.0
         with:
-          target: 'http://localhost:3000' #Point scanner
-          cmd_options: '-I'         # fail on WARN+
-      - uses: github/codeql-action/upload-sarif@v3
+          target: 'http://localhost:3000'
+          cmd_options: '-I -w report_zap.md -r report_zap.html'
+      - uses: actions/upload-artifact@v4 #upload results
         if: always()
         with:
-          sarif_file: report_zap.sarif
+          name: zap-baseline-report
+          path: |
+            report_zap.html
+            report_zap.md
 
   full:                   # 30 min nightly
     if: github.event.schedule=='0 2 * * *'
@@ -34,12 +37,11 @@ jobs:
         with:
           target: 'https://staging.myapp.com'
           rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-I'
+          cmd_options: '-I -w report_zap.md -r report_zap.html'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: zap-full-report #upload reports to security tab
+          name: zap-full-report
           path: |
             report_zap.html
             report_zap.md
-            report_zap.sarif
