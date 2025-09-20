@@ -356,3 +356,24 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+  test-server:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Use Node 20  # Juice-Shop needs ≥ 18
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm       # makes install ~5-10 s on cache hit
+
+    - name: Install dependencies  # ← this is the missing piece
+      run: npm ci                 # MUST be done in the same job
+
+    - name: Run server tests with retry
+      uses: nick-invision/retry@v3   # or the SHA you pinned
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: npm run test:server   # now finds ./node_modules/.bin/nyc
