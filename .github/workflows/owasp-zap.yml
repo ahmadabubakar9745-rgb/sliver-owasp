@@ -1,0 +1,43 @@
+name: Security – ZAP
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  baseline:               # 1 min gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm start &
+      - run: npx wait-on http://localhost:3000
+      - uses: zaproxy/action-baseline@v0.11.0
+        with:
+          target: 'http://localhost:3000' #Point scanner
+          cmd_options: '-I'         # fail on WARN+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: report_zap.sarif
+
+  full:                   # 30 min nightly
+    if: github.event.schedule=='0 2 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Full active scan
+        uses: zaproxy/action-full-scan@v0.9.0
+        with:
+          target: 'https://staging.myapp.com'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-I'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-full-report #upload reports to security tab
+          path: |
+            report_zap.html
+            report_zap.md
+            report_zap.sarif
