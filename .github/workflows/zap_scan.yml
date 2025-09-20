@@ -21,11 +21,5 @@ jobs:
           rules_file_name: '.zap/rules.tsv'
           cmd_options: '-a -j'
           
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: zap-baseline-report
-          path: |
-            report_zap.html
-            report_zap.md
+    
 
