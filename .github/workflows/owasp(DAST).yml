@@ -76,7 +76,7 @@ jobs:
           target: "http://localhost:${{ env.APP_PORT }}"
           cmd_options: '-a'   # include alpha passive rules
 
-      # ------------------------------------------------------------------
+           # ------------------------------------------------------------------
       # 8. Export ZAP reports safely
       # ------------------------------------------------------------------
       - name: Export ZAP reports
@@ -92,8 +92,13 @@ jobs:
             echo "No ZAP volume found. Skipping copy."
           else
             echo "Copying reports from volume: $VOL"
-            docker run --rm -v "$VOL:/zap:ro" -v "$PWD/zap-report:/out" alpine \
-              sh -c 'cp /zap/*.{html,xml,json,md} /out/ 2>/dev/null || true'
+            docker run --rm -v "$VOL:/zap:ro" -v "$PWD/zap-report:/out" alpine sh -c "\
+              for f in /zap/*; do \
+                case \$f in \
+                  *.html|*.xml|*.json|*.md) cp \"\$f\" /out/ ;; \
+                esac; \
+              done"
+
 
       # ------------------------------------------------------------------
       # 9. Upload ZAP reports as artifact
