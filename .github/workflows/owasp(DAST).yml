@@ -24,7 +24,7 @@ jobs:
         run: docker rm -f ${{ env.IMAGE_NAME }} || true
 
       - name: Build Docker image (tagged with commit SHA)
-        run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f "${{ env.DOCKER_PATH }}" .
+        run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f "${{ env.DOCKERFILE_PATH }}" .
 
       # ------------------------------------------------------------------
       # 1. Start container
@@ -67,6 +67,18 @@ jobs:
         with:
           target: "http://localhost:${{ env.APP_PORT }}"
           cmd_options: '-a'   # include alpha passive rules
+
+      # ------------------------------------------------------------------
+      # Extract the reports that ZAP wrote into its Docker volume
+      # ------------------------------------------------------------------
+      - name: Export ZAP reports
+        if: always()
+        run: |
+          # find the volume that the baseline action created
+          VOL=$(docker volume ls --format "{{.Name}}" | grep -E '_zap$|zap-work$' | head -n1)
+          # copy everything that looks like a report
+          docker run --rm -v "$VOL:/zap:ro" -v "$PWD:/out" alpine \
+            sh -c 'cp /zap/*.{html,xml,json,md} /out/ 2>/dev/null || true'
 
       # ------------------------------------------------------------------
       # Upload reports even if the scan failed
