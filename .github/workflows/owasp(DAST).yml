@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: myapp               # change if you want a different image name
+  IMAGE_NAME: myapp               # Docker image name
   DOCKERFILE_PATH: ./Dockerfile   # path to your Dockerfile
   APP_PORT: 3000                  # port your app listens on
   HEALTH_PATH: /health            # health-check endpoint
@@ -17,18 +17,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ------------------------------------------------------------------
+      # 1. Checkout repository
+      # ------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------------
+      # 2. Ensure no previous container is running
+      # ------------------------------------------------------------------
       - name: Ensure no previous container is running (best-effort)
         run: docker rm -f ${{ env.IMAGE_NAME }} || true
 
+      # ------------------------------------------------------------------
+      # 3. Build Docker image
+      # ------------------------------------------------------------------
       - name: Build Docker image (tagged with commit SHA)
         run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f "${{ env.DOCKERFILE_PATH }}" .
 
       # ------------------------------------------------------------------
-      # 1. Start container
-      # 2. Stream logs in background so we can watch start-up problems
+      # 4. Run container and stream logs
       # ------------------------------------------------------------------
       - name: Run container
         run: |
@@ -41,7 +49,7 @@ jobs:
           docker logs -f ${{ env.IMAGE_NAME }} &
 
       # ------------------------------------------------------------------
-      # Quick sanity checks – remove when everything works
+      # 5. Sanity-check container
       # ------------------------------------------------------------------
       - name: Sanity-check container state
         run: |
@@ -51,7 +59,7 @@ jobs:
           docker port ${{ env.IMAGE_NAME }}
 
       # ------------------------------------------------------------------
-      # Wait until the health endpoint returns HTTP 200
+      # 6. Wait until the health endpoint returns HTTP 200
       # ------------------------------------------------------------------
       - name: Wait for app health endpoint
         run: |
@@ -60,7 +68,7 @@ jobs:
             'until curl -fsS http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }} >/dev/null 2>&1; do sleep 2; done'
 
       # ------------------------------------------------------------------
-      # Run ZAP baseline scan
+      # 7. Run OWASP ZAP baseline scan
       # ------------------------------------------------------------------
       - name: OWASP ZAP baseline scan
         uses: zaproxy/action-baseline@v0.14.0
@@ -69,34 +77,36 @@ jobs:
           cmd_options: '-a'   # include alpha passive rules
 
       # ------------------------------------------------------------------
-      # Extract the reports that ZAP wrote into its Docker volume
+      # 8. Export ZAP reports safely
       # ------------------------------------------------------------------
       - name: Export ZAP reports
         if: always()
         run: |
+          # create folder to copy reports
+          mkdir -p ./zap-report
+
           # find the volume that the baseline action created
-          VOL=$(docker volume ls --format "{{.Name}}" | grep -E '_zap$|zap-work$' | head -n1)
-          # copy everything that looks like a report
-          docker run --rm -v "$VOL:/zap:ro" -v "$PWD:/out" alpine \
-            sh -c 'cp /zap/*.{html,xml,json,md} /out/ 2>/dev/null || true'
+          VOL=$(docker volume ls --format "{{.Name}}" | grep -E '.*_zap$|.*zap-work$' | head -n1)
+
+          if [ -z "$VOL" ]; then
+            echo "No ZAP volume found. Skipping copy."
+          else
+            echo "Copying reports from volume: $VOL"
+            docker run --rm -v "$VOL:/zap:ro" -v "$PWD/zap-report:/out" alpine \
+              sh -c 'cp /zap/*.{html,xml,json,md} /out/ 2>/dev/null || true'
 
       # ------------------------------------------------------------------
-      # Upload reports even if the scan failed
+      # 9. Upload ZAP reports as artifact
       # ------------------------------------------------------------------
       - name: Collect ZAP reports (upload as artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: zap-reports-${{ github.run_id }}
-          path: |
-            baseline_report.html
-            zap_report.html
-            zap_report.xml
-            ./zap-report/*.html
-            .zap/*
+          path: ./zap-report/*
 
       # ------------------------------------------------------------------
-      # Clean-up
+      # 10. Shut down app container
       # ------------------------------------------------------------------
       - name: Shut down app
         if: always()
