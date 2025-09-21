@@ -6,125 +6,52 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: myapp               # Docker image name
-  DOCKERFILE_PATH: ./Dockerfile   # path to your Dockerfile
-  APP_PORT: 3000                  # port your app listens on
-  HEALTH_PATH: /health            # health-check endpoint
-  HEALTH_TIMEOUT: 120             # seconds to wait for health
+  IMAGE_NAME: myapp
+  DOCKERFILE_PATH: ./Dockerfile
+  APP_PORT: 3000
+  HEALTH_PATH: /health
+  HEALTH_TIMEOUT: 120
 
 jobs:
   zap:
     runs-on: ubuntu-latest
 
     steps:
-      # ------------------------------------------------------------------
-      # 1. Checkout repository
-      # ------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------------
-      # 2. Ensure no previous container is running
-      # ------------------------------------------------------------------
-      - name: Ensure no previous container is running (best-effort)
+      - name: Ensure no previous container is running
         run: docker rm -f ${{ env.IMAGE_NAME }} || true
 
-      # ------------------------------------------------------------------
-      # 3. Build Docker image
-      # ------------------------------------------------------------------
-      - name: Build Docker image (tagged with commit SHA)
+      - name: Build Docker image
         run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f "${{ env.DOCKERFILE_PATH }}" .
 
-      # ------------------------------------------------------------------
-      # 4. Run container and stream logs
-      # ------------------------------------------------------------------
       - name: Run container
         run: |
           docker run -d \
             -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
             --name ${{ env.IMAGE_NAME }} \
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-          # keep printing logs while the next step waits
           docker logs -f ${{ env.IMAGE_NAME }} &
 
-      # ------------------------------------------------------------------
-      # 5. Sanity-check container
-      # ------------------------------------------------------------------
       - name: Sanity-check container state
         run: |
-          echo "Container status:"
           docker ps -a --filter name=${{ env.IMAGE_NAME }}
-          echo "Port binding:"
           docker port ${{ env.IMAGE_NAME }}
 
-      # ------------------------------------------------------------------
-      # 6. Wait until the health endpoint returns HTTP 200
-      # ------------------------------------------------------------------
       - name: Wait for app health endpoint
         run: |
-          echo "Waiting up to $HEALTH_TIMEOUT s for http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }}"
           timeout ${{ env.HEALTH_TIMEOUT }} bash -c \
             'until curl -fsS http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }} >/dev/null 2>&1; do sleep 2; done'
 
-      # ------------------------------------------------------------------
-      # 7. Run OWASP ZAP baseline scan
-      # ------------------------------------------------------------------
+      # ✅ FIXED: Let ZAP action handle reports
       - name: OWASP ZAP baseline scan
         uses: zaproxy/action-baseline@v0.14.0
         with:
           target: "http://localhost:${{ env.APP_PORT }}"
-          cmd_options: '-a'   # include alpha passive rules
+          cmd_options: '-a'
+          artifact_name: "zap-reports-${{ github.run_id }}"
 
-      # ------------------------------------------------------------------
-      # 8. Export ZAP reports safely — ✅ FIXED VERSION
-      # ------------------------------------------------------------------
-      - name: Export ZAP reports
-        if: always()
-        run: |
-          mkdir -p ./zap-report
-
-          echo "🔎 Listing ALL Docker volumes for debugging..."
-          docker volume ls
-
-          # ✅ FIXED: Use broader, case-insensitive search for 'zap'
-          VOL=$(docker volume ls --format "{{.Name}}" | grep -i "zap" | head -n1)
-
-          if [ -z "$VOL" ]; then
-            echo "❌ ERROR: No ZAP volume found. Reports were generated but not copied."
-            echo "💡 Check the volume list above. Look for any volume with 'zap' in the name."
-            exit 1  # Fail the step so you notice it — remove if you prefer to continue
-          else
-            echo "✅ Found ZAP volume: $VOL"
-            echo "📁 Contents of /zap inside volume:"
-            docker run --rm -v "$VOL:/zap:ro" alpine ls -la /zap/
-
-            echo "📄 Copying report files..."
-            docker run --rm -v "$VOL:/zap:ro" -v "$PWD/zap-report:/out" alpine sh -c '
-              for f in /zap/*; do
-                case $f in
-                  *.html|*.xml|*.json|*.md)
-                    echo "   → $(basename "$f")"
-                    cp "$f" /out/
-                    ;;
-                esac
-              done
-            '
-          fi
-
-      # ------------------------------------------------------------------
-      # 9. Upload ZAP reports as artifact
-      # ------------------------------------------------------------------
-      - name: Collect ZAP reports (upload as artifact)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-reports-${{ github.run_id }}
-          path: ./zap-report/*
-
-      # ------------------------------------------------------------------
-      # 10. Shut down app container
-      # ------------------------------------------------------------------
       - name: Shut down app
         if: always()
         run: docker rm -f ${{ env.IMAGE_NAME }}
