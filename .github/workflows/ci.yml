@@ -69,7 +69,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest] # FIXME: Removed "windows-latest" due to 'Error: ENOENT: no such file or directory, open' error breaking at least on Node 20.0 constantly
+        os: [ubuntu-latest, macos-latest]
         node-version: [20, 22, 24]
     steps:
       - name: "Check out Git repository"
@@ -172,7 +172,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_DEFAULT_VERSION }}
       - name: "Install application"
-        if: github.repository == 'juice-shop/juice-shop' || (github.repository != 'juice-shop/juice-shop' && matrix.os == 'ubuntu-latest' && matrix.node-version == '22')
         run: npm install
       - name: "Execute server tests for each custom configuration"
         uses: nick-invision/retry@7152eba30c6575329ac0576536151aca5a72780e #v3.0.0
@@ -196,7 +195,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        browser: [chrome] # FIXME Switch back to [chrome, firefox] after debugging extreme flakiness of Firefox on CI/CD
+        browser: [chrome]
       fail-fast: false
     steps:
       - name: "Check out Git repository"
@@ -217,11 +216,10 @@ jobs:
           browser: ${{ matrix.browser }}
           start: npm start
           wait-on: http://localhost:3000
-          record: true
+          record: false
           group: ${{ matrix.browser }} @ ${{ matrix.os }}
         env:
           SOLUTIONS_WEBHOOK: ${{ secrets.E2E_SOLUTIONS_WEBHOOK }}
-          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: "Execute end-to-end tests on Mac"
         if: ${{ matrix.os == 'macos-latest' }}
@@ -231,11 +229,10 @@ jobs:
           browser: ${{ matrix.browser }}
           start: npm start
           wait-on: http://localhost:3000
-          record: true
+          record: false
           group: ${{ matrix.browser }} @ ${{ matrix.os }}
         env:
           CYPRESS_CACHE_FOLDER: /Users/runner/Library/Caches/Cypress
-          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   smoke-test:
     runs-on: ubuntu-latest
@@ -359,21 +356,18 @@ jobs:
   test-server:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Use Node 20  # Juice-Shop needs ≥ 18
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-        cache: npm       # makes install ~5-10 s on cache hit
-
-    - name: Install dependencies  # ← this is the missing piece
-      run: npm ci                 # MUST be done in the same job
-
-    - name: Run server tests with retry
-      uses: nick-invision/retry@v3   # or the SHA you pinned
-      with:
-        timeout_minutes: 10
-        max_attempts: 3
-        command: npm run test:server   # now finds ./node_modules/.bin/nyc
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node 20  # Juice-Shop needs ≥ 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run server tests with retry
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npm run test:server
