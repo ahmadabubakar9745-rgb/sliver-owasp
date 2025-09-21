@@ -8,7 +8,7 @@ on:
 env:
   IMAGE_NAME: myapp               # change if you want a different image name
   DOCKERFILE_PATH: ./Dockerfile   # path to your Dockerfile
-  APP_PORT: 8080                  # port your app listens on
+  APP_PORT: 3000                  # port your app listens on
   HEALTH_PATH: /health            # health-check endpoint
   HEALTH_TIMEOUT: 120             # seconds to wait for health
 
