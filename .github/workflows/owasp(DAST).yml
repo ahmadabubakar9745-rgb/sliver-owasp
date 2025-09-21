@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: myapp                   # change if you want a different image name
-  DOCKERFILE_PATH: ./Dockerfile       # path to your Dockerfile (can be './app/Dockerfile' etc)
-  APP_PORT: 8080                      # port your app listens on
-  HEALTH_PATH: /health                # healthcheck endpoint path
-  HEALTH_TIMEOUT: 120                 # seconds to wait for health endpoint
+  IMAGE_NAME: myapp               # change if you want a different image name
+  DOCKERFILE_PATH: ./Dockerfile   # path to your Dockerfile
+  APP_PORT: 8080                  # port your app listens on
+  HEALTH_PATH: /health            # health-check endpoint
+  HEALTH_TIMEOUT: 120             # seconds to wait for health
 
 jobs:
   zap:
@@ -21,44 +21,71 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Ensure no previous container is running (best-effort)
-        run: |
-          docker rm -f ${{ env.IMAGE_NAME }} || true
+        run: docker rm -f ${{ env.IMAGE_NAME }} || true
 
       - name: Build Docker image (tagged with commit SHA)
-        run: |
-          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f "${{ env.DOCKERFILE_PATH }}" .
+        run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} -f "${{ env.DOCKER_PATH }}" .
 
+      # ------------------------------------------------------------------
+      # 1. Start container
+      # 2. Stream logs in background so we can watch start-up problems
+      # ------------------------------------------------------------------
       - name: Run container
         run: |
-          docker run -d -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} --name ${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker run -d \
+            -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+            --name ${{ env.IMAGE_NAME }} \
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
+          # keep printing logs while the next step waits
+          docker logs -f ${{ env.IMAGE_NAME }} &
+
+      # ------------------------------------------------------------------
+      # Quick sanity checks – remove when everything works
+      # ------------------------------------------------------------------
+      - name: Sanity-check container state
+        run: |
+          echo "Container status:"
+          docker ps -a --filter name=${{ env.IMAGE_NAME }}
+          echo "Port binding:"
+          docker port ${{ env.IMAGE_NAME }}
+
+      # ------------------------------------------------------------------
+      # Wait until the health endpoint returns HTTP 200
+      # ------------------------------------------------------------------
       - name: Wait for app health endpoint
         run: |
-          echo "Waiting up to $HEALTH_TIMEOUT seconds for http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }}"
-          timeout ${{ env.HEALTH_TIMEOUT }} bash -c 'until curl -fsS http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }} >/dev/null 2>&1; do sleep 2; done'
+          echo "Waiting up to $HEALTH_TIMEOUT s for http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }}"
+          timeout ${{ env.HEALTH_TIMEOUT }} bash -c \
+            'until curl -fsS http://localhost:${{ env.APP_PORT }}${{ env.HEALTH_PATH }} >/dev/null 2>&1; do sleep 2; done'
 
+      # ------------------------------------------------------------------
+      # Run ZAP baseline scan
+      # ------------------------------------------------------------------
       - name: OWASP ZAP baseline scan
         uses: zaproxy/action-baseline@v0.14.0
         with:
           target: "http://localhost:${{ env.APP_PORT }}"
-          # rules_file_name: '.zap/rules.tsv'  # uncomment if you have an ignore/override file in repo
-          cmd_options: '-a'                    # include alpha passive rules
+          cmd_options: '-a'   # include alpha passive rules
 
+      # ------------------------------------------------------------------
+      # Upload reports even if the scan failed
+      # ------------------------------------------------------------------
       - name: Collect ZAP reports (upload as artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: zap-reports-${{ github.run_id }}
           path: |
-            # common places/names used by ZAP/this action - adjust if your setup differs
             baseline_report.html
             zap_report.html
             zap_report.xml
             ./zap-report/*.html
-            .zap/*.tsv
-            .zap/*.xml
-            .zap/*.html
+            .zap/*
 
+      # ------------------------------------------------------------------
+      # Clean-up
+      # ------------------------------------------------------------------
       - name: Shut down app
         if: always()
         run: docker rm -f ${{ env.IMAGE_NAME }}
