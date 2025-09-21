@@ -77,25 +77,36 @@ jobs:
           cmd_options: '-a'   # include alpha passive rules
 
       # ------------------------------------------------------------------
-      # 8. Export ZAP reports safely
+      # 8. Export ZAP reports safely — ✅ FIXED VERSION
       # ------------------------------------------------------------------
       - name: Export ZAP reports
         if: always()
         run: |
-          # create folder to copy reports
           mkdir -p ./zap-report
 
-          # find the volume that the baseline action created
-          VOL=$(docker volume ls --format "{{.Name}}" | grep -E '.*_zap$|.*zap-work$' | head -n1)
+          echo "🔎 Listing ALL Docker volumes for debugging..."
+          docker volume ls
+
+          # ✅ FIXED: Use broader, case-insensitive search for 'zap'
+          VOL=$(docker volume ls --format "{{.Name}}" | grep -i "zap" | head -n1)
 
           if [ -z "$VOL" ]; then
-            echo "No ZAP volume found. Skipping copy."
+            echo "❌ ERROR: No ZAP volume found. Reports were generated but not copied."
+            echo "💡 Check the volume list above. Look for any volume with 'zap' in the name."
+            exit 1  # Fail the step so you notice it — remove if you prefer to continue
           else
-            echo "Copying reports from volume: $VOL"
+            echo "✅ Found ZAP volume: $VOL"
+            echo "📁 Contents of /zap inside volume:"
+            docker run --rm -v "$VOL:/zap:ro" alpine ls -la /zap/
+
+            echo "📄 Copying report files..."
             docker run --rm -v "$VOL:/zap:ro" -v "$PWD/zap-report:/out" alpine sh -c '
               for f in /zap/*; do
                 case $f in
-                  *.html|*.xml|*.json|*.md) cp "$f" /out/ ;;
+                  *.html|*.xml|*.json|*.md)
+                    echo "   → $(basename "$f")"
+                    cp "$f" /out/
+                    ;;
                 esac
               done
             '
