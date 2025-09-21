@@ -8,7 +8,7 @@ on:
       - '*.md'
       - 'LICENSE'
       - 'monitoring/grafana-dashboard.json'
-      - 'screenshots/**'
+      - 'screenshots/**' #
     tags-ignore:
       - '*'
   pull_request:
